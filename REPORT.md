@@ -1,53 +1,76 @@
-# Практическая работа №5
+# Отчет по практической работе №5
+## Проектирование безопасных релизных процессов, паттернов миграции данных и эксплуатационной документации ИС «Умный кампус»
 
-**Проектирование безопасных релизных процессов, паттернов миграции данных и эксплуатационной документации ИС «Умный кампус»**
+---
 
-| | |
-|---|---|
-| Студент | Тимофеева Полина Антоновна |
-| Группа | И14-23-9 |
-| Дисциплина | МДК 03.01 |
-| Вариант | 9. Парковка (Шлагбаум) |
-| Задача | CAMPUS-109. Переименование поля CarPlate > LicensePlate |
+### Титульная информация
 
-## Состав работы
+| Параметр | Значение |
+|----------|----------|
+| **ФИО студента** | Тимофеева Полина Антоновна |
+| **Группа** | И14-23-9 |
+| **Номер варианта** | 9 |
+| **Модуль ИС** | Парковка (Шлагбаум) |
+| **Задача Jira** | CAMPUS-109 |
+| **Суть миграции БД** | Переименование поля CarPlate > LicensePlate |
+| **Дата выполнения** | 24.10.2026 |
 
-Контроллер с тегами OpenTelemetry – [ParkingSessionsController.cs](src/SmartCampus.Parking/Controllers/ParkingSessionsController.cs)
+---
 
-Двойная запись в старую и новую колонку – [ParkingSessionRepository.cs](src/SmartCampus.Parking/Services/ParkingSessionRepository.cs)
+## Ссылки на артефакты
 
-SQL-скрипты миграции – [01_expand.sql](sql/01_expand.sql), [02_migrate.sql](sql/02_migrate.sql), [03_contract.sql](sql/03_contract.sql)
+### Блок 1. Единый цифровой след (Digital Traceability)
+- [Контроллер с тегами OpenTelemetry](src/SmartCampus.Parking/Controllers/ParkingSessionsController.cs)
+- [Подключение OpenTelemetry в Program.cs](src/SmartCampus.Parking/Program.cs)
+- Коммит `[CAMPUS-109] Add tracing tags and business logic`
 
-Production Sanity-тест – [ParkingSanityTests.cs](tests/SmartCampus.Parking.SanityTests/ParkingSanityTests.cs)
+### Блок 2. Регламент релиза и Change Management
+- [Change Request CR-2026-109](docs/change-request-v1.9.0.md)
+- [Правила защиты ветки main](docs/branch-protection.md)
+- [Проверка сборки в CI](../.github/workflows/ci.yml)
 
-Change Request – [change-request-v1.9.0.md](docs/change-request-v1.9.0.md)
+### Блок 3. Безопасная миграция базы данных (Expand and Contract)
+- [Фаза 1. Expand](sql/01_expand.sql)
+- [Фаза 2. Migrate](sql/02_migrate.sql)
+- [Фаза 3. Contract](sql/03_contract.sql)
+- [Репозиторий с двойной записью car_plate и license_plate](src/SmartCampus.Parking/Services/ParkingSessionRepository.cs)
 
-Правила защиты ветки main – [branch-protection.md](docs/branch-protection.md)
+### Блок 4. Sanity-тестирование и Docs-as-Code
+- [Production Sanity-тест](tests/SmartCampus.Parking.SanityTests/ParkingSanityTests.cs)
+- [ADR-0009](docs/adr/0009-rename-carplate-to-licenseplate.md)
+- [Changelog](CHANGELOG.md)
 
-ADR – [0009-rename-carplate-to-licenseplate.md](docs/adr/0009-rename-carplate-to-licenseplate.md)
+---
 
-Changelog – [CHANGELOG.md](CHANGELOG.md)
+## Описание заполненного Change Request
 
-Изменения зафиксированы коммитом с сообщением `[CAMPUS-109] Add tracing tags and business logic`.
+**Номер CR** – CR-2026-109  
+**Версия** – v1.9.0  
+**Сервис** – parking-service (модуль «Парковка (Шлагбаум)»)
 
-## Цифровой след
+### Бизнес-цель
+Номер автомобиля хранится в колонке `car_plate` таблицы `parking_sessions`. Камеры распознавания и другие сервисы кампуса называют это поле `LicensePlate`, поэтому в коде постоянно приходится переводить одно название в другое. Релиз добавляет колонку `license_plate`, двойную запись и теги трассировки. Цель – единое название поля во всех сервисах без остановки шлагбаума.
 
-В каждом методе контроллера ParkingSessionsController текущая операция берется из Activity.Current. В нее записываются тег jira.issue со значением CAMPUS-109 и доменный идентификатор campus.parking_session_id. Для въезда дополнительно указывается campus.barrier_id. Сам номер автомобиля в теги не попадает, так как это персональные данные. Трассировка подключена в Program.cs через OpenTelemetry с инструментированием ASP.NET Core.
+### Окно обслуживания
+Выбрано время **воскресенье 01.11.2026, 03:00–05:00 МСК**. Гостевой въезд на территорию кампуса ночью закрыт, а по журналу шлагбаума в это время проезжает 3–4 служебных автомобиля в час. В воскресенье нет занятий, и до утреннего потока остается запас времени на откат. Работы занимают около 1,5 часа.
 
-## Change Request
+### План проведения работ
+1. **Подготовка** (03:00) – резервная копия таблицы `parking_sessions`.
+2. **Expand** (03:10) – выполнение `01_expand.sql`, добавление колонки `license_plate` и индекса.
+3. **Выкатка** (03:20) – `kubectl set image` на образ 1.9.0 с двойной записью, контроль `kubectl rollout status`.
+4. **Sanity-тест** (03:35) – создание и удаление тестовой сессии въезда.
+5. **Migrate** (03:45) – выполнение `02_migrate.sql`, проверка `not_migrated = 0`.
+6. **Проверка трасс** (04:00) – поиск по тегу `jira.issue = CAMPUS-109`.
 
-Заявка CR-2026-109 оформлена на релиз v1.9.0 сервиса parking-service. Релиз добавляет колонку license_plate, двойную запись номера и теги трассировки. Цель релиза – единое название поля во всех сервисах кампуса без остановки шлагбаума.
+Фаза **Contract** (`03_contract.sql`) выполняется отдельной заявкой вместе с версией v1.10.0, когда сервис уже не обращается к `car_plate`.
 
-Окно обслуживания назначено на воскресенье 01.11.2026 с 03:00 до 05:00 МСК. В это время гостевой въезд закрыт, а по журналу шлагбаума проезжает всего 3–4 служебных автомобиля в час. Утренний пик в воскресенье начинается поздно, поэтому на откат остается достаточно времени.
+### План отката
+Откат выполняется, если Sanity-тест не прошел, ошибок 5xx больше 2 % дольше 5 минут или шлагбаум не открывается по распознанному номеру.
+```bash
+kubectl rollout undo deployment/parking-service -n smart-campus
+kubectl rollout status deployment/parking-service -n smart-campus
+```
+Колонку `license_plate` удалять не нужно, предыдущая версия ее не замечает. При повреждении данных таблица восстанавливается из резервной копии.
 
-План работ начинается с резервной копии таблицы parking_sessions. Затем выполняется скрипт 01_expand.sql, выкатывается образ 1.9.0 и запускается Sanity-тест. Только после этого переносятся исторические данные скриптом 02_migrate.sql. Фаза Contract в этот релиз не входит и пойдет отдельной заявкой вместе с v1.10.0.
-
-Откат выполняется командой kubectl rollout undo deployment/parking-service -n smart-campus. Поводом для него служат проваленный Sanity-тест, доля ошибок 5xx выше 2 % дольше пяти минут или отказ шлагбаума открыться по распознанному номеру. Новую колонку при откате удалять не нужно, предыдущая версия ее не замечает.
-
-## Миграция Expand and Contract
-
-На фазе Expand добавляется колонка license_plate с разрешенным NULL и индекс, построенный без блокировки таблицы. Версия v1.9.0 пишет номер сразу в обе колонки. На фазе Migrate старые записи получают значение из car_plate, а контрольный запрос показывает, сколько строк осталось. Фаза Contract делает license_plate обязательной и удаляет car_plate, но только после выхода версии, которая со старой колонкой уже не работает.
-
-## Sanity-тест
-
-Тест ParkingSanityTests после релиза создает на боевом стенде тестовую сессию въезда с номером SANITY000 и проверяет, что ее можно прочитать. В блоке finally сессия удаляется в любом случае, даже если одна из проверок не прошла. Адрес стенда задается переменной окружения SANITY_BASE_URL.
+### Branch Protection Rules
+Для ветки `main` требуется Pull Request, **1 одобрение** и обязательное согласование владельца кода для папки `sql/`. Слияние возможно только после успешной проверки **build** в CI. Force push и удаление ветки запрещены, правила действуют и для администраторов.
